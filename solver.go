@@ -1,14 +1,12 @@
 package solver
 
 import (
-	// "strconv"
 	"fmt"
 )
 
 type PuzzleState struct {
 	N     int
 	Cells [][]uint
-	PrevState *PuzzleState
 	Actions []Swap
 }
 
@@ -24,6 +22,7 @@ type Pos struct {
 type Swap struct {
 	Pos
 	IsHor bool // True в случае если swap был по горизонтали
+	Entropy uint // параметр характеризующий упорядоченность системы. Полностью упорядочено - 0
 }
 
 type Queue struct {
@@ -69,7 +68,6 @@ func (p *PuzzleState) CreateChildState() *PuzzleState {
 		}
 	}
 
-	dst.PrevState = p
 	dst.Actions = append([]Swap{}, p.Actions...)
 	return dst
 }
@@ -93,9 +91,9 @@ func (p PuzzleState) Print() {
 /*	Выводит в стандартный вывод ожиаемое действие над текущей матрицей в человекопонятном виде  */
 func (p PuzzleState) PrintAction(action Swap) {
 	if action.IsHor == true {
-		fmt.Printf("horizontal row %d col %d (values %d and %d)\n", action.Row, action.Col, p.Cells[action.Row][action.Col - 1], p.Cells[action.Row][action.Col])
+		fmt.Printf("horizontal row %d col %d (values %d and %d) entropy %d\n", action.Row, action.Col, p.Cells[action.Row][action.Col - 1], p.Cells[action.Row][action.Col], int(action.Entropy))
 	} else {
-		fmt.Printf("vertical row %d col %d (values %d and %d)\n", action.Row, action.Col, p.Cells[action.Row - 1][action.Col], p.Cells[action.Row][action.Col])
+		fmt.Printf("vertical row %d col %d (values %d and %d) entropy %d\n", action.Row, action.Col, p.Cells[action.Row - 1][action.Col], p.Cells[action.Row][action.Col], int(action.Entropy))
 	}
 }
 
@@ -192,6 +190,12 @@ func (p *PuzzleState) FindEtalon() *PuzzleState {
 }
 
 func (p *PuzzleState) IsEqual(etalon *PuzzleState) bool {
+	if p == nil {
+		println("State is NIL")
+	}
+	if etalon == nil {
+		println("Etalon is NIL")
+	}
 	for i := 0; i < p.N; i++ {
 		for j := 0; j < p.N; j++ {
 			if p.Cells[i][j] != etalon.Cells[i][j] {
@@ -203,8 +207,8 @@ func (p *PuzzleState) IsEqual(etalon *PuzzleState) bool {
 }
 
 /*	В случае Col == 1 будут поменяны местами колонки 0 и 1  */
-func (p *PuzzleState) SwapHorizontal(pos Pos) {
-	p.Actions = append(p.Actions, Swap{Pos: Pos{Row: pos.Row, Col: pos.Col}, IsHor: true})
+func (p *PuzzleState) SwapHorizontal(pos Pos, etalon *PuzzleState) {
+	p.Actions = append(p.Actions, Swap{Pos: Pos{Row: pos.Row, Col: pos.Col}, IsHor: true, Entropy: p.FindEntropy(etalon)})
 	val0 := p.Cells[pos.Row][pos.Col - 1]
 	val1 := p.Cells[pos.Row][pos.Col]
 	p.changeCell(val0, pos)
@@ -213,8 +217,8 @@ func (p *PuzzleState) SwapHorizontal(pos Pos) {
 }
 
 /*	В случае Row == 1 будут поменяны местами ячейки в рядах 0 и 1  */
-func (p *PuzzleState) SwapVertical(pos Pos) {
-	p.Actions = append(p.Actions, Swap{Pos: Pos{Row: pos.Row, Col: pos.Col}, IsHor: false})
+func (p *PuzzleState) SwapVertical(pos Pos, etalon *PuzzleState) {
+	p.Actions = append(p.Actions, Swap{Pos: Pos{Row: pos.Row, Col: pos.Col}, IsHor: false, Entropy: p.FindEntropy(etalon)})
 	val0 := p.Cells[pos.Row - 1][pos.Col]
 	val1 := p.Cells[pos.Row][pos.Col]
 	p.changeCell(val0, pos)
@@ -266,12 +270,111 @@ func (p PuzzleState) IsCanSwapVertical(pos Pos) bool {
 	return true
 }
 
+func (p *PuzzleState) findPosOfValue(value uint) Pos {
+	for nRow, row := range p.Cells {
+		for nCol, val := range row {
+			if val == value {
+				return Pos{Row: nRow, Col: nCol}
+			}
+		}
+	}
+	/*	Вообще всегда должно находить значение, так что следующая строка никогда не должна выполниться  */
+	return Pos{}
+}
+
+func findDeltaSqr(realPos, etalonPos Pos) uint {
+	var deltaRowSqr, deltaColSqr int
+	// if realPos.Row > etalonPos.Row {
+	// 	deltaRowSqr = realPos.Row - etalonPos.Row
+	// } else {
+	// 	deltaRowSqr = etalonPos.Row - realPos.Row
+	// }
+	deltaRowSqr = (realPos.Row - etalonPos.Row) * (realPos.Row - etalonPos.Row)
+	// if realPos.Col > etalonPos.Col {
+	// 	deltaColSqr = realPos.Col - etalonPos.Col
+	// } else {
+	// 	deltaColSqr = etalonPos.Col - realPos.Col
+	// }
+	deltaColSqr = (realPos.Col - etalonPos.Col) * (realPos.Col - etalonPos.Col)
+	return uint(deltaRowSqr + deltaColSqr)
+}
+
+func (p *PuzzleState) FindEntropy(etalon *PuzzleState) uint {
+	var entropy uint
+	for nRow, row := range etalon.Cells {
+		for nCol, val := range row {
+			entropy += findDeltaSqr(p.findPosOfValue(val), Pos{Row: nRow, Col: nCol})
+		}
+	}
+	return entropy
+}
+
+/*	Проверяю чтобы энтропия системы уменьшалась (улучшилась ли энтропия за N * 2 + 1 ходов)  */
+func (p *PuzzleState) IsEntropyCorrect() bool {
+	var desiredEntropyStepsLen int = p.N + 5
+	// if p.N > 5 {
+	// 	desiredEntropyStepsLen = 4
+	// } else {
+	// 	desiredEntropyStepsLen = 8 - p.N
+	// }
+	if len(p.Actions) <= desiredEntropyStepsLen + 1 {
+		return true
+	}
+	oldAction := p.Actions[len(p.Actions) - (desiredEntropyStepsLen)]
+	lastAction := p.Actions[len(p.Actions) - 1]
+	if oldAction.Entropy < lastAction.Entropy {
+		return false
+	}
+	return true
+}
+
+/*	Вычисляет насколько улучшилась энтропия. Отрицательное число - ситуация ухудшилась  */
+func (p *PuzzleState) GetEntropyImprovement() int {
+	var desiredEntropyStepsLen int = 3
+	if len(p.Actions) == 0 {
+		return 0
+	}
+	if len(p.Actions) <= desiredEntropyStepsLen + 1 {
+		return int(p.Actions[0].Entropy) - int(p.Actions[len(p.Actions) - 1].Entropy)
+	}
+	return int(p.Actions[len(p.Actions) - 1 - desiredEntropyStepsLen].Entropy) - int(p.Actions[len(p.Actions) - 1].Entropy)
+}
+
+/*	Функция должна оставлять только 20 самых перспективных вариантов и удалять все лишние
+**	Реализовано сортировкой с последующим отбросом хвоста  */
+func (q *Queue) Optimize() {
+	var maxLen int = 500
+	if q.len() < maxLen {
+		return
+	}
+	for i := 0; i < q.len() - 1; i++ {
+		for j := i + 1; j < q.len(); j++ {
+			var state1 = q.queue[i]
+			var state2 = q.queue[j]
+			if state1.GetEntropyImprovement() < state2.GetEntropyImprovement() {
+				tmp := q.queue[i]
+				q.queue[i] = q.queue[j]
+				q.queue[j] = tmp
+			}
+		}
+	}
+	println("Optimization")
+	// for i := 0; i < maxLen - 1; i++ {
+	// 	print(q.queue[i].GetEntropyImprovement())
+	// 	print(" ")
+	// }
+	// println("")
+	q.queue = q.queue[0:maxLen - 1]
+}
+
 /*	Данная функция не защищена от невалидных изначальных значений изначального состояния
 **	Поэтому предварительно должна быть проведена валидация  */
 func Solve(initState *PuzzleState) *PuzzleState {
 	var etalon = initState.FindEtalon()
 	var q = &Queue{}
 	var p = initState
+	// var maxQueueLength = 30
+	var lastLen int
 	q.PushBack(initState)
 	for p.IsEqual(etalon) == false {
 		for row := 0; row < p.N; row++ {
@@ -279,25 +382,39 @@ func Solve(initState *PuzzleState) *PuzzleState {
 				/*	Если какое-то действие доступно, делаю его и помещаю результат в очередь  */
 				if p.IsCanSwapHorizontal(Pos{Col: col, Row: row}) == true {
 					child := p.CreateChildState()
-					child.SwapHorizontal(Pos{Col: col, Row: row})
+					child.SwapHorizontal(Pos{Col: col, Row: row}, etalon)
 					/*	Оптимизация  */
 					if child.IsEqual(etalon) {
 						return child
 					}
-					q.PushBack(child)
+					// if child.IsEntropyCorrect() {
+						q.PushBack(child)
+					// }
 				}
 				if p.IsCanSwapVertical(Pos{Col: col, Row: row}) == true {
 					child := p.CreateChildState()
-					child.SwapVertical(Pos{Col: col, Row: row})
+					child.SwapVertical(Pos{Col: col, Row: row}, etalon)
 					/*	Оптимизация  */
 					if child.IsEqual(etalon) {
 						return child
 					}
-					q.PushBack(child)
+					// if child.IsEntropyCorrect() {
+						q.PushBack(child)
+					// }
 				}
 			}
 		}
+		if len(p.Actions) > lastLen {
+			q.Optimize()
+			lastLen = len(p.Actions)
+			print("STEP ")
+			println(lastLen)
+		}
 		p = q.PopUp()
+		if p == nil {
+			println("P is NIL after POP Up!!!!")
+		}
+		
 	}
 	return p
 }

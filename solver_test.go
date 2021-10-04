@@ -15,9 +15,28 @@ func testingInit3x3() [][]uint {
 	return dst
 }
 
+func testingInit3x3Simple() [][]uint {
+	var dst [][]uint
+	dst = append(dst, []uint{3, 4, 0})
+	dst = append(dst, []uint{1, 2, 5})
+	dst = append(dst, []uint{8, 7, 6})
+	return dst
+}
+
 func testingInit3x3State() *PuzzleState {
 	var dst = CreateState(3)
 	var src = testingInit3x3()
+	for nRow, row := range src {
+		for nCol, val := range row {
+			dst.changeCell(val, Pos{Row: nRow, Col: nCol})
+		}
+	}
+	return dst
+}
+
+func testingInit3x3StateSimple() *PuzzleState {
+	var dst = CreateState(3)
+	var src = testingInit3x3Simple()
 	for nRow, row := range src {
 		for nCol, val := range row {
 			dst.changeCell(val, Pos{Row: nRow, Col: nCol})
@@ -49,12 +68,12 @@ func TestStatePrint(t *testing.T) {
 	p.Print()
 	
 	
-	p.SwapHorizontal(Pos{Row: 0, Col: 1})
-	p.SwapVertical(Pos{Row: 1, Col: 0})
+	p.SwapHorizontal(Pos{Row: 0, Col: 1}, p)
+	p.SwapVertical(Pos{Row: 1, Col: 0}, p)
 	if p.IsCanSwapVertical(Pos{Row: 1, Col: 1}) == false {
 		t.Errorf("Не могу сделать swap по вертикали Pos{Row: 1, Col: 1}")
 	}
-	p.SwapVertical(Pos{Row: 1, Col: 1})
+	p.SwapVertical(Pos{Row: 1, Col: 1}, p)
 	if p.IsCanSwapHorizontal(Pos{Row: 0, Col: 1}) == false {
 		t.Errorf("Не могу сделать swap по горизонтали Pos{Row: 0, Col: 1}")
 	}
@@ -146,6 +165,7 @@ func TestQueue(t *testing.T) {
 func TestSolver(t *testing.T) {
 	/*	Решение матрицы 2*2 может привести к зацикливанию !! */
 	var p = testingRandomizedState(3)
+	// var p = testingInit3x3StateSimple()
 	var etalon = p.FindEtalon()
 	var result = Solve(p)
 
@@ -157,9 +177,9 @@ func TestSolver(t *testing.T) {
 		for _, action := range result.Actions {
 			p.PrintAction(action)
 			if action.IsHor == true {
-				p.SwapHorizontal(action.Pos)
+				p.SwapHorizontal(action.Pos, etalon)
 			} else {
-				p.SwapVertical(action.Pos)
+				p.SwapVertical(action.Pos, etalon)
 			}
 			p.Print()
 			
